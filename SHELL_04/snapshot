@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [ "$#" -ne 3 ]; then
+    echo "Uzycie: $0 SRC PREV DEST" >&2
+    exit 1
+fi
+
+SRC="$1"
+PREV="$2"
+DEST="$3"
+
+if [ ! -d "$SRC" ]; then
+    echo "Blad: katalog zrodlowy SRC nie istnieje lub nie jest katalogiem." >&2
+    exit 1
+fi
+
+if [ "$PREV" != "-" ] && [ ! -d "$PREV" ]; then
+    echo "Blad: katalog PREV nie istnieje." >&2
+    exit 1
+fi
+
+if [ -e "$DEST" ]; then
+    echo "Blad: katalog docelowy DEST juz istnieje." >&2
+    exit 1
+fi
+
+# Uzywamy -An aby usunac numeracje bajtow, -tx1 aby kodowac hex bajt po bajcie, tr wycina spacje i nowe linie, -v by nie pominac odczytanych linii
+to_hex() {
+    printf '%s' "$1" | od -An -tx1 -v | tr -d ' \n'
+}
+
+mkdir -p -- "$DEST" # Chronimy przed nazwami plikow zaczynajacymi sie od '-'
+
+declare -A utworzone_katalogi
+raport=()
+
+zarejestruj_katalog() {
+    local rel_dir="$1"
+    if [ "$rel_dir" = "." ] || [ -z "$rel_dir" ]; then
+        return
+    fi
+
+    local parent_dir
+    parent_dir=$(dirname -- "$rel_dir")
+    if [ "$parent_dir" != "." ] && [ "$parent_dir" != "/" ]; then
+        zarejestruj_katalog "$parent_dir"
+    fi
+
+    # Sprawdzamy, czy klucz istnieje w tablicy asocjacyjnej (+x)
+    if [ -z "${utworzone_katalogi[$rel_dir]+x}" ]; then
+        mkdir -p -- "$DEST/$rel_dir"
+        utworzone_katalogi["$rel_dir"]=1
+        local hex_dir
+        hex_dir=$(to_hex "$rel_dir")
+        raport+=("$(printf 'DIR\t%s' "$hex_dir")")
+    fi
+}
+
+find "$SRC" -type f -print0 | {
+    # IFS= zapobiega obcinaniu spacji, -r ignoruje znak '\', a -d '' uwaza bajt NUL (\0) za koniec rekordu
+    while IFS= read -r -d '' plik_src; do
+        rel_path="${plik_src#"$SRC"/}"     # Chcemy uzyskac czysta sciezke wzgledna
+        while [[ "$rel_path" == /* ]]; do
+            rel_path="${rel_path#/}"
+        done
+
+        rel_dir=$(dirname -- "$rel_path")
+        zarejestruj_katalog "$rel_dir"
+
+        plik_dest="$DEST/$rel_path"
+        rozmiar=$(stat -c "%s" -- "$plik_src") # Wypisujemy sam rozmiar pliku w bajtach
+        hex_path=$(to_hex "$rel_path")
+
+        # Sprawdzamy czy plik istnieje i jest zwyklym plikiem -f, wykluczamy symlinki ! -L , i porownujemy bajt po bajcie cmp -s
+        if [ "$PREV" != "-" ] && [ -f "$PREV/$rel_path" ] && [ ! -L "$PREV/$rel_path" ] && cmp -s -- "$plik_src" "$PREV/$rel_path"; then
+            ln -- "$PREV/$rel_path" "$plik_dest"
+            raport+=("$(printf 'LINK\t%s\t%s' "$hex_path" "$rozmiar")")
+        else
+            cp -- "$plik_src" "$plik_dest"
+            raport+=("$(printf 'COPY\t%s\t%s' "$hex_path" "$rozmiar")")
+        fi
+    done
+
+    # LC_ALL=C wymusza sortowanie binarne, -t $'\t' ustawia tabulator jako separator kolumn, -k2,2 sortuje po 2. kolumnie (HEX_SCIEZKI)
+    if [ "${#raport[@]}" -gt 0 ]; then
+        printf '%s\n' "${raport[@]}" | LC_ALL=C sort -t $'\t' -k2,2 -k1,1r
+    fi
+}
