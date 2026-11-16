@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Wyswietlanie menu pomocy (priotytet)
+for arg in "$@"; do
+    if [[ "$arg" == "--help" ]]; then
+        echo "Usage: ./arg2 [OPTIONS] [ARGUMENTS]"
+        echo ""
+        echo "Options:"
+        echo "  -i FILE      input file"
+        echo "  -o FILE      output file"
+        echo "  -q           unsupported option"
+        echo "  --help       display this help and exit"
+        exit 0
+    fi
+done
+
+# Sprawdzamy obecność opcji -q
+for arg in "$@"; do
+    if [[ "$arg" == "-q" ]]; then
+        echo "Unsupported option: -q"
+        exit 0
+    fi
+done
+
+# Opcje: wszystkie litery alfabetu z czego opcje 'i' oraz 'o' wymagaja argumentu (oznaczone dwukropkiem)
+options="abcdefghjklmnprstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZi:o:"
+
+# Normalizacja argumentów przez getopt
+if ! parsed_args=$(getopt -q -o "$options" -l "help" -n "$0" -- "$@"); then 
+    echo "-i -o options require a filename"
+    exit 0
+fi
+
+eval set -- "$parsed_args"
+
+declare -a chosen_options=()
+
+# Przetwarzanie argumentow
+while [[ "$1" != "--" ]]; do
+    if [[ "$1" == "-i" || "$1" == "-o" ]]; then # Obsluga opcji -i -o
+        if [[ -z "$2" || "$2" == -* ]]; then   # Sprawdzamy, czy argument nie jest pusty albo nie jest kolejna flaga (poczatek -)
+            echo "-i -o options require a filename"
+            exit 0
+        fi
+        chosen_options+=("$1 present and set to \"$2\"")
+        shift 2
+
+    elif [[ "$1" =~ ^-[a-zA-Z]$ ]]; then  # Dodajemy pozostale opcje
+        chosen_options+=("$1 present")
+        shift
+        
+    else # Pomijamy help i nieznane elementy
+        shift
+    fi
+done
+
+# Przesuniecie o jeden, zeby pozbyc sie '--' i zostawic same argumenty koncowe
+shift
+
+# Sortowanie i wypisanie zapisanych opcji
+if (( ${#chosen_options[@]} > 0 )); then
+    printf '%s\n' "${chosen_options[@]}" | sort -u # Flaga -u zeby usunac duplikaty
+fi
+
+# Wypisanie argumentow
+if (( $# > 0 )); then
+    echo "Arguments are:"
+    arg_num=1
+    for pos_arg in "$@"; do
+        echo "\$$arg_num=$pos_arg"
+        ((arg_num++))
+    done
+fi

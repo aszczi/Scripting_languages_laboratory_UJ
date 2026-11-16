@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Sprawdzamy obecność opcji -q
+for arg in "$@"; do
+    if [[ "$arg" == "-q" ]]; then
+        echo "Unsupported option: -q"
+        exit 0
+    fi
+done
+
+# Opcje: wszystkie litery alfabetu z czego opcje 'i' oraz 'o' wymagaja argumentu (oznaczone dwukropkiem)
+options=":abcdefghjklmnprstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZi:o:"
+
+declare -a chosen_options=()
+
+# Przetwarzanie argumentow
+while getopts "$options" option; do
+    if [[ "$option" == "i" || "$option" == "o" ]]; then # Obsługa opcji -i oraz -o 
+        if [[ -z "$OPTARG" || "$OPTARG" == -* ]]; then # Sprawdzamy, czy argument nie jest pusty albo nie jest kolejna flaga (poczatek -)
+            echo "-i -o options require a filename"
+            exit 0
+        fi
+        chosen_options+=("-$option present and set to \"$OPTARG\"")
+
+    elif [[ "$option" == ":" ]]; then # Wyłapanie błędu, gdy na samym końcu brakuje argumentu dla -i lub -o
+        echo "-i -o options require a filename"
+        exit 0
+
+    elif [[ "$option" == [a-zA-Z] ]]; then  # Dodajemy pozostale opcje
+        chosen_options+=("-$option present")
+    fi
+done
+
+# Przesunięcie argumentów o przetworzone już opcje
+shift $((OPTIND - 1))
+
+# Sortowanie i wypisanie zapisanych opcji 
+if (( ${#chosen_options[@]} > 0 )); then
+    printf '%s\n' "${chosen_options[@]}" | sort -u # Flaga -u zeby usunac duplikaty
+fi
+
+# Wypisanie argumentów 
+if (( $# > 0 )); then
+    echo "Arguments are:"
+    arg_num=1
+    for pos_arg in "$@"; do
+        echo "\$$arg_num=$pos_arg"
+        ((arg_num++))
+    done
+fi
