@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# IFS = zapobiega obcinaniu spacji, -r ignoruje znak '\', a -d '' uwaza bajt NUL (\0) za koniec rekordu
+while IFS= read -r -d '' plik; do
+    
+    if [ -z "$plik" ] || [ ! -f "$plik" ]; then
+        continue
+    fi
+
+    # Uzywamy -An aby usunac numeracje bajtow, -tx1 aby kodowac hex bajt po bajcie, tr wycina spacje i nowe linie
+    hex_sciezki=$(printf "%s" "$plik" | od -An -tx1 | tr -d ' \n')
+ 
+    rozmiar_w_bajtach=$(wc -c < "$plik")
+    suma_md5=$(md5sum < "$plik" | cut -d' ' -f1)
+
+    printf "%s\t%s\t%s\n" "$hex_sciezki" "$rozmiar_w_bajtach" "$suma_md5"
+done | sort

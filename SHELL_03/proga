@@ -1,0 +1,27 @@
+#!/bin/bash
+
+katalog="$1"
+
+if [ -z "$katalog" ] || [ ! -d "$katalog" ]; then
+    echo "Podaj poprawna sciezke do katalogu." >&2
+    exit 1
+fi
+
+(
+    cd -- "$katalog" >/dev/null || exit 1
+    find . -type f -printf "%P\0"
+) | while IFS= read -r -d '' sciezka_wzgledna; do
+    if [ -z "$sciezka_wzgledna" ]; then
+        continue
+    fi
+    
+    pelna_sciezka="$katalog/$sciezka_wzgledna"
+
+    # Uzywamy -An aby usunac numeracje bajtow, -tx1 aby kodowac hex bajt po bajcie, tr wycina spacje i nowe linie
+    sciezka_hex=$(printf "%s" "$sciezka_wzgledna" | od -An -tx1 | tr -d ' \n')
+
+    rozmiar_w_bajtach=$(wc -c < "$pelna_sciezka")
+    suma_md5=$(md5sum < "$pelna_sciezka" | cut -d' ' -f1)
+
+    printf "%s\t%s\t%s\n" "$sciezka_hex" "$rozmiar_w_bajtach" "$suma_md5"
+done | sort
