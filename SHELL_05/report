@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# LC_ALL=C – liczby z kropka (56.67), a nie z przecinkiem (56,67)
+export LC_ALL=C
+
+wypisz_blad() {
+    echo "report: $*" >&2    # >&2 – wypisz na stderr zamiast stdout
+}
+
+wypisz_uzycie_i_zakoncz() {
+    wypisz_blad "uzycie: $0 WYNIKI_TSV KONFIG_JSON"
+    exit 1
+}
+
+odczytaj_prog_zaliczenia() {
+    # -r – wypisz surowa wartosc (bez cudzyslowow)
+    jq -r '.passing_score' "$plik_konfiguracji"
+}
+
+odczytaj_grupy() {
+    # .groups[] – kazdy element tablicy w osobnej linii
+    jq -r '.groups[]' "$plik_konfiguracji"
+}
+
+wypisz_raport_grupy() {
+    local grupa=$1
+
+    # -F '\t' – kolumny rozdzielone tabulatorem
+    # -v nazwa=wartosc – przekazanie zmiennej z basha do awk
+    # $1, $3 – pierwsza i trzecia kolumna (grupa, punkty)
+    awk -F '\t' -v grupa="$grupa" -v prog_zaliczenia="$prog_zaliczenia" '
+        $1 == grupa {
+            liczba_studentow++
+            suma_punktow += $3
+            if ($3 >= prog_zaliczenia) zaliczyli++
+        }
+        END {
+            srednia = (liczba_studentow > 0) ? suma_punktow / liczba_studentow : 0
+
+            print  "Group " grupa ":"
+            printf "Students: %d\n",  liczba_studentow
+            printf "Passed: %d\n",    zaliczyli
+            printf "Failed: %d\n",    liczba_studentow - zaliczyli
+            printf "Average: %.2f\n", srednia      # %.2f – 2 miejsca po kropce
+        }
+    ' "$plik_wynikow"
+}
+
+
+[ "$#" -eq 2 ] || wypisz_uzycie_i_zakoncz     # $# – liczba argumentow
+
+plik_wynikow=$1
+plik_konfiguracji=$2
+
+for plik in "$plik_wynikow" "$plik_konfiguracji"; do
+    [ -r "$plik" ] || { wypisz_blad "nie mozna odczytac pliku: $plik"; exit 1; }    # -r – plik istnieje i da sie go czytac
+done
+
+prog_zaliczenia=$(odczytaj_prog_zaliczenia) || { wypisz_blad "niepoprawny JSON: $plik_konfiguracji"; exit 1; }
+
+czy_pierwsza_grupa=true
+
+# IFS= – nie obcinaj spacji z poczatku/konca linii
+# read -r – nie traktuj "\" jako znaku specjalnego
+# < <(...) – czytaj wyjscie polecenia tak, jakby bylo plikiem
+while IFS= read -r grupa; do
+    [ "$czy_pierwsza_grupa" = true ] || echo     # pusta linia miedzy blokami
+    czy_pierwsza_grupa=false
+
+    wypisz_raport_grupy "$grupa"
+done < <(odczytaj_grupy)
