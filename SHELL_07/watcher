@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+set -u
+set -o pipefail
+export LC_ALL=C
+
+if [[ $# -ne 2 ]]; then
+    printf 'Użycie: %s KATALOG LICZBA_ZDARZEŃ\n' "$0" >&2
+    exit 2
+fi
+
+katalog=$1
+liczba_zdarzen=$2
+
+if [[ ! -d $katalog ]]; then
+    printf 'Katalog nie istnieje: %s\n' "$katalog" >&2
+    exit 2
+fi
+
+if [[ ! $liczba_zdarzen =~ ^[0-9]+$ ]]; then
+    printf 'LICZBA_ZDARZEŃ musi być nieujemną liczbą całkowitą.\n' >&2
+    exit 2
+fi
+
+if (( 10#$liczba_zdarzen == 0 )); then
+    exit 0
+fi
+
+for narzedzie in inotifywait od tr stat md5sum cut; do
+    if ! command -v "$narzedzie" >/dev/null 2>&1; then
+        printf 'Wymagane narzędzie nie jest dostępne: %s\n' "$narzedzie" >&2
+        exit 1
+    fi
+done
+
+pid_obserwatora=
+
+posprzataj() {
+    if [[ -n $pid_obserwatora ]]; then
+        # Zamyka inotifywait także po przerwaniu skryptu.
+        kill "$pid_obserwatora" 2>/dev/null || :
+        wait "$pid_obserwatora" 2>/dev/null || :
+    fi
+}
+
+trap posprzataj EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+coproc OBSERWATOR { inotifywait -m -e close_write -e moved_to --format '%f' -- "$katalog"; }
+pid_obserwatora=$OBSERWATOR_PID
+deskryptor_zdarzen=${OBSERWATOR[0]}
+
+pozostalo=$((10#$liczba_zdarzen))
+while IFS= read -r -u "$deskryptor_zdarzen" nazwa_pliku; do
+    plik="$katalog/$nazwa_pliku"
+
+    [[ -f $plik ]] || continue
+
+    hex_nazwy=$(printf '%s' "$nazwa_pliku" | od -An -tx1 | tr -d ' \n') || {
+        printf 'Nie udało się zakodować nazwy pliku.\n' >&2
+        exit 1
+    }
+    rozmiar=$(stat -c '%s' -- "$plik") || {
+        printf 'Nie udało się odczytać rozmiaru pliku: %s\n' "$plik" >&2
+        exit 1
+    }
+    md5=$(md5sum <"$plik" | cut -d ' ' -f1) || {
+        printf 'Nie udało się obliczyć sumy kontrolnej pliku: %s\n' "$plik" >&2
+        exit 1
+    }
+
+    printf '%s\t%s\t%s\n' "$hex_nazwy" "$rozmiar" "$md5"
+    ((pozostalo -= 1))
+    ((pozostalo == 0)) && break
+done
+
+exec {deskryptor_zdarzen}<&-
+
+if (( pozostalo > 0 )); then
+    printf 'Nie udało się odebrać wymaganej liczby zdarzeń.\n' >&2
+    exit 1
+fi
